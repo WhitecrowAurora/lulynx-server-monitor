@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>控制面板</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body class="admin-locked">
+    <div class="halftone" aria-hidden="true"></div>
+
+    <div class="topwrap">
+      <header class="topbar">
+        <div class="top-left">
+          <a class="pill link" href="/" title="返回">← 返回</a>
+        </div>
+        <div class="top-stats" style="justify-content:center">
+          <div class="stat" style="min-width:280px">
+            <div class="label">控制面板登录（管理密码）</div>
+            <div class="value">
+              <input id="tokenInput" class="input" placeholder="管理密码（X-Admin-Token）" />
+              <button class="pill" id="loginBtn" type="button">登录</button>
+              <button class="pill" id="logoutBtn" type="button" style="background:#fff">退出</button>
+            </div>
+          </div>
+        </div>
+        <div class="top-right"></div>
+      </header>
+      <div class="tape" aria-hidden="true">
+        <div class="tape-inner animate-marquee" id="tapeInner"></div>
+      </div>
+    </div>
+
+    <main class="grid admin-grid">
+      <section class="card admin-card">
+        <div class="card-head">
+          <div class="title-row">
+            <div class="server-name">全局设置</div>
+          </div>
+          <div class="sub-row">
+            <div class="sub">修改后会影响新服务器默认策略</div>
+          </div>
+        </div>
+        <div class="metrics admin-form">
+          <div class="form-row">
+            <label>默认采集间隔（秒）</label>
+            <input class="input" id="setCollect" type="number" min="1" />
+          </div>
+          <div class="form-row">
+            <label>历史保留（天）</label>
+            <input class="input" id="setRetention" type="number" min="1" />
+          </div>
+          <div class="form-row">
+            <label>面板轮询（秒）</label>
+            <input class="input" id="setPoll" type="number" min="1" />
+          </div>
+          <div class="form-row">
+            <label>启用分组/标签</label>
+            <input id="setGrouping" type="checkbox" />
+            <div class="sub">开启后主页按标签分组折叠；未设置标签的归入“未分组”</div>
+          </div>
+          <div class="form-row">
+            <label>滚动条字段</label>
+            <input class="input" id="setTape" placeholder="time,traffic_today,speed_now,conn_total,offline,expire_soon" />
+            <button class="pill" id="editTape" type="button">编辑</button>
+            <button class="pill" id="tapeDefault" type="button" style="background:#fff">默认</button>
+          </div>
+          <div class="form-row">
+            <button class="pill" id="saveSettings" type="button">保存设置</button>
+            <div class="sub" id="settingsMsg"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card admin-card wide">
+        <div class="card-head">
+          <div class="title-row">
+            <div class="server-name">已探测到的服务器</div>
+            <div class="sub">勾选“显示”才会出现在监控主页</div>
+          </div>
+        </div>
+        <div class="metrics">
+          <div class="admin-toolbar">
+            <button class="pill" id="refreshBtn" type="button">刷新</button>
+            <input class="input" id="filterInput" placeholder="搜索：ID / 名称 / 地区" />
+          </div>
+          <div class="table-wrap">
+            <table class="table" id="serversTable">
+              <thead>
+                <tr>
+                  <th>显示</th>
+                  <th>ID</th>
+                  <th>名称</th>
+                  <th>地区</th>
+                  <th>标签</th>
+                  <th>在线</th>
+                  <th>最后上报</th>
+                  <th>到期日期</th>
+                  <th>流量配额(TB)</th>
+                  <th>流量续期</th>
+                  <th>模块</th>
+                  <th>受控</th>
+                  <th>受控端口</th>
+                  <th>端口探活</th>
+                  <th>端口</th>
+                  <th>保存</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="sub" id="serversMsg"></div>
+        </div>
+      </section>
+
+      <section class="card admin-card wide">
+        <div class="card-head">
+          <div class="title-row">
+            <div class="server-name">黑名单（接入密码尝试）</div>
+            <div class="sub">同一 IP 连续输错接入密码（enroll_token）会自动封禁；可在这里解除</div>
+          </div>
+        </div>
+        <div class="metrics">
+          <div class="admin-toolbar">
+            <button class="pill" id="refreshBansBtn" type="button">刷新</button>
+            <input class="input" id="banIpInput" placeholder="输入要解除的 IP（或点表格里的解除）" style="min-width:320px" />
+            <button class="pill" id="unbanBtn" type="button">解除</button>
+          </div>
+          <div class="table-wrap">
+            <table class="table" id="bansTable">
+              <thead>
+                <tr>
+                  <th>IP</th>
+                  <th>失败次数</th>
+                  <th>封禁到</th>
+                  <th>最后失败</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="sub" id="bansMsg"></div>
+        </div>
+      </section>
+
+      <section class="card admin-card wide">
+        <div class="card-head">
+          <div class="title-row">
+            <div class="server-name">黑名单（管理密码尝试）</div>
+            <div class="sub">同一 IP 连续输错管理密码会自动封禁（只阻止继续错误尝试；输入正确管理密码会自动解除）</div>
+          </div>
+        </div>
+        <div class="metrics">
+          <div class="admin-toolbar">
+            <button class="pill" id="refreshAdminBansBtn" type="button">刷新</button>
+            <input class="input" id="adminBanIpInput" placeholder="输入要解除的 IP（或点表格里的解除）" style="min-width:320px" />
+            <button class="pill" id="adminUnbanBtn" type="button">解除</button>
+          </div>
+          <div class="table-wrap">
+            <table class="table" id="adminBansTable">
+              <thead>
+                <tr>
+                  <th>IP</th>
+                  <th>失败次数</th>
+                  <th>封禁到</th>
+                  <th>最后失败</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="sub" id="adminBansMsg"></div>
+        </div>
+      </section>
+    </main>
+
+    <div class="modal hidden" id="listModal" role="dialog" aria-modal="true" aria-hidden="true">
+      <div class="modal-backdrop" id="modalBackdrop"></div>
+      <div class="modal-panel">
+        <div class="modal-head">
+          <div class="server-name" id="modalTitle">编辑</div>
+          <button class="pill pill-sm" id="modalClose" type="button" style="background:#fff">关闭</button>
+        </div>
+        <div class="sub">勾选要显示的内容；拖动可调整顺序（保存后按顺序输出）。</div>
+        <div class="modal-body" id="modalList"></div>
+        <div class="modal-actions">
+          <button class="pill" id="modalSave" type="button">保存</button>
+          <button class="pill" id="modalCancel" type="button" style="background:#fff">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/tz_util.js"></script>
+    <script src="/tz_modal.js"></script>
+    <script src="/tz_admin.js"></script>
+    <script src="/admin.js"></script>
+  </body>
+</html>

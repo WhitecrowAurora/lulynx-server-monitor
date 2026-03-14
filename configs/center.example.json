@@ -1,0 +1,15 @@
+{
+  "listen_addr": ":38088",
+  "data_dir": "./data",
+  "ingest_token": "change-me",
+  "admin_token": "change-me-too",
+  "enroll_token": "change-me-too",
+  "enroll_max_fails": 5,
+  "enroll_ban_hours": 8,
+  "trust_proxy": false,
+  "allow_auto_register": true,
+  "stealth_ingest_unauthorized": true,
+  "default_collect_interval_seconds": 5,
+  "default_retention_days": 30,
+  "dashboard_poll_seconds": 3
+}

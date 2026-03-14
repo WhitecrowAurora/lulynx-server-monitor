@@ -1,0 +1,26 @@
+# Binaries / build outputs
+/dist/
+/bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Runtime data / logs
+/data/
+/backups/
+*.log
+*.pid
+
+# Local configs (never commit secrets)
+center.json
+probe.json
+agent.json
+/config/*.json
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+

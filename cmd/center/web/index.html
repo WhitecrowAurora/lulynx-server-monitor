@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>探针面板</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div class="halftone" aria-hidden="true"></div>
+    <div class="topwrap">
+    <header class="topbar">
+      <div class="top-left">
+        <button class="pill" id="filterAllBtn" type="button">所有</button>
+      </div>
+      <div class="top-stats">
+        <div class="stat">
+          <div class="label">当前时间</div>
+          <div class="value" id="nowTime">--:--:--</div>
+        </div>
+        <div class="stat">
+          <div class="label">当前在线</div>
+          <div class="value"><span id="onlineCount">0</span> / <span id="totalCount">0</span></div>
+        </div>
+        <div class="stat">
+          <div class="label">地区统计</div>
+          <div class="value" id="regionCount">0</div>
+        </div>
+        <div class="stat">
+          <div class="label row">
+            流量总计
+            <select id="trafficWindow" class="select">
+              <option value="1d">1天</option>
+              <option value="1w">1周</option>
+              <option value="1m">1月</option>
+            </select>
+          </div>
+          <div class="value">
+            <span class="up">↑</span> <span id="trafficUp">0</span>
+            <span class="down">↓</span> <span id="trafficDown">0</span>
+          </div>
+        </div>
+        <div class="stat">
+          <div class="label">网速</div>
+          <div class="value small" id="speedLine">--</div>
+        </div>
+      </div>
+      <div class="top-right">
+        <button class="pill" id="compactBtn" type="button" title="折叠/展开更多指标">简洁</button>
+        <a class="pill link" id="adminBtn" href="/admin" title="控制面板">管理</a>
+        <a class="pill link" href="/" title="刷新">⟳</a>
+      </div>
+    </header>
+    <div class="tape" aria-hidden="true">
+      <div class="tape-inner animate-marquee" id="tapeInner"></div>
+    </div>
+    </div>
+
+    <main class="grid" id="cards"></main>
+
+    <template id="cardTpl">
+      <section class="card">
+        <button class="pill pill-sm ctrl-toggle" type="button" title="切换受控模式（需要管理密码）"></button>
+        <div class="ctrl-overlay hidden"></div>
+        <div class="card-inner">
+        <div class="card-head">
+          <div class="title-row">
+            <div class="server-name"></div>
+            <div class="status-dot" title="在线状态"></div>
+          </div>
+          <div class="sub-row">
+            <div class="sub expiry" data-widget="expiry"></div>
+            <div class="sub lastseen" data-widget="lastseen"></div>
+          </div>
+          <div class="sub-row">
+            <div class="sub region" data-widget="region"></div>
+            <div class="sub traffic-renew" data-widget="traffic_renew"></div>
+          </div>
+          <div class="meta-row">
+            <div class="meta-item" data-widget="meta"><span class="ico">🖥</span><span class="cores">-</span></div>
+            <div class="meta-item" data-widget="meta"><span class="ico">🧠</span><span class="mem">-</span></div>
+            <div class="meta-item" data-widget="meta"><span class="ico">💽</span><span class="disk">-</span></div>
+          </div>
+        </div>
+
+        <div class="metrics">
+          <div class="metric" data-metric="cpu" data-widget="cpu">
+            <div class="m-row">
+              <div class="m-left">
+                <div class="m-name">CPU</div>
+                <div class="m-sub cores2"></div>
+              </div>
+              <div class="m-bar"><div class="fill cpu"></div></div>
+              <div class="m-right"><span class="pct cpu-pct">0%</span></div>
+            </div>
+            <canvas class="spark" width="220" height="26"></canvas>
+          </div>
+
+          <div class="metric" data-metric="mem" data-widget="mem">
+            <div class="m-row">
+              <div class="m-left">
+                <div class="m-name">内存</div>
+                <div class="m-sub mem-sub"></div>
+              </div>
+              <div class="m-bar"><div class="fill mem"></div></div>
+              <div class="m-right"><span class="pct mem-pct">0%</span></div>
+            </div>
+            <canvas class="spark" width="220" height="26"></canvas>
+          </div>
+
+          <div class="metric" data-metric="swap" data-widget="swap">
+            <div class="m-row">
+              <div class="m-left">
+                <div class="m-name">SWAP</div>
+                <div class="m-sub swap-sub"></div>
+              </div>
+              <div class="m-bar"><div class="fill swap"></div></div>
+              <div class="m-right"><span class="pct swap-pct">0%</span></div>
+            </div>
+            <canvas class="spark" width="220" height="26"></canvas>
+          </div>
+
+          <div class="metric" data-metric="disk" data-widget="disk">
+            <div class="m-row">
+              <div class="m-left">
+                <div class="m-name">硬盘</div>
+                <div class="m-sub disk-sub"></div>
+              </div>
+              <div class="m-bar"><div class="fill disk"></div></div>
+              <div class="m-right"><span class="pct disk-pct">0%</span></div>
+            </div>
+            <canvas class="spark" width="220" height="26"></canvas>
+          </div>
+
+          <div class="metric" data-metric="net" data-widget="net">
+            <div class="m-row no-bar">
+              <div class="m-left">
+                <div class="m-name">网络</div>
+              </div>
+              <div class="m-right mono"><span class="up">↑</span> <span class="net-up">0</span> <span class="down">↓</span> <span class="net-down">0</span></div>
+            </div>
+            <canvas class="spark" width="220" height="26"></canvas>
+          </div>
+
+          <div class="metric" data-metric="traffic" data-widget="traffic">
+            <div class="m-row no-bar">
+              <div class="m-left">
+                <div class="m-name">流量</div>
+              </div>
+              <div class="m-right mono"><span class="up">↑</span> <span class="traffic-up">0</span> <span class="down">↓</span> <span class="traffic-down">0</span></div>
+            </div>
+            <div class="quota-wrap" data-widget="quota">
+              <div class="quota-bar"><div class="quota-fill"></div></div>
+              <div class="quota-text sub"></div>
+            </div>
+            <canvas class="spark" width="220" height="26"></canvas>
+          </div>
+
+          <div class="metric" data-metric="load" data-widget="load">
+            <div class="m-row no-bar">
+              <div class="m-left">
+                <div class="m-name">负载</div>
+              </div>
+              <div class="m-right mono"><span class="load">0.00 | 0.00 | 0.00</span></div>
+            </div>
+            <canvas class="spark" width="220" height="26"></canvas>
+          </div>
+
+          <div class="footer">
+            <div class="sub" data-widget="uptime">在线: <span class="uptime">-</span></div>
+          </div>
+
+          <div class="ports" data-widget="ports"></div>
+        </div>
+        </div>
+      </section>
+    </template>
+
+    <script src="/tz_util.js"></script>
+    <script src="/tz_spark.js"></script>
+    <script src="/tz_dashboard.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

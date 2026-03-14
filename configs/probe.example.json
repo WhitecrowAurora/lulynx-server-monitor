@@ -1,0 +1,15 @@
+{
+  "agent_id": "la-01",
+  "name": "LA-01",
+  "central_url": "http://CENTER_HOST:38088",
+  "ingest_token": "change-me",
+  "enroll_token": "",
+  "encrypt_enabled": false,
+  "collect_interval_seconds": 5,
+  "disk_mount": "/",
+  "net_iface": "",
+  "port_probe_enabled": false,
+  "port_probe_host": "127.0.0.1",
+  "ports": [22, 80, 443],
+  "tcp_conn_enabled": true
+}
