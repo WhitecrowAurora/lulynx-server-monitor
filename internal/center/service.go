@@ -138,6 +138,11 @@ func (s *Service) routes() {
 
 	sub, _ := fs.Sub(s.fs, "web")
 	static := http.FileServer(http.FS(sub))
+	staticNoCache := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Avoid confusing UI issues during rapid iterations/upgrades where browsers keep old CSS/JS cached.
+		w.Header().Set("Cache-Control", "no-store")
+		static.ServeHTTP(w, r)
+	})
 	s.mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -151,7 +156,7 @@ func (s *Service) routes() {
 		u := *r.URL
 		u.Path = "/admin.html"
 		r2.URL = &u
-		static.ServeHTTP(w, r2)
+		staticNoCache.ServeHTTP(w, r2)
 	})
 	s.mux.HandleFunc("/admin/login", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -166,7 +171,7 @@ func (s *Service) routes() {
 		u := *r.URL
 		u.Path = "/login.html"
 		r2.URL = &u
-		static.ServeHTTP(w, r2)
+		staticNoCache.ServeHTTP(w, r2)
 	})
 	s.mux.HandleFunc("/admin/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin", http.StatusPermanentRedirect)
@@ -174,7 +179,7 @@ func (s *Service) routes() {
 	s.mux.HandleFunc("/admin.html", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin", http.StatusTemporaryRedirect)
 	})
-	s.mux.Handle("/", static)
+	s.mux.Handle("/", staticNoCache)
 }
 
 func (s *Service) loadState() error {
