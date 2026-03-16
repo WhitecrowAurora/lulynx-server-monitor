@@ -1,11 +1,14 @@
 package center
 
 import (
+	"crypto/rand"
 	"embed"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -31,13 +34,18 @@ type Service struct {
 	roll   *globalRolling
 	dedup  *dedupStore
 
-	ingestKey  [32]byte
-	secrets    map[string]string
-	enrollBans *banStore
-	adminBans  *banStore
+	ingestKey       [32]byte
+	secrets         map[string]string
+	enrollBans      *banStore
+	adminBans       *banStore
+	adminSessionsMu sync.Mutex
+	adminSessions   map[string]adminSession
 
 	closed chan struct{}
 }
+
+const adminSessionCookieName = "tz_admin_session"
+const adminSessionTTL = 24 * time.Hour
 
 type serverState struct {
 	cfg ServerConfig
@@ -65,19 +73,25 @@ type serverMeta struct {
 	Arch  string `json:"arch,omitempty"`
 }
 
+type adminSession struct {
+	User      string
+	ExpiresAt time.Time
+}
+
 func NewService(cfg Config, webFS embed.FS) (*Service, error) {
 	s := &Service{
-		cfg:        cfg,
-		fs:         webFS,
-		mux:        http.NewServeMux(),
-		servers:    map[string]*serverState{},
-		series:     NewSeriesStore(filepath.Join(cfg.DataDir, "series")),
-		roll:       newGlobalRolling(43200), // 30 days * 1440 minutes
-		dedup:      newDedupStore(10 * time.Minute),
-		secrets:    map[string]string{},
-		enrollBans: newBanStore(cfg.EnrollMaxFails, time.Duration(cfg.EnrollBanHours)*time.Hour, "enroll_bans.json"),
-		adminBans:  newBanStore(cfg.EnrollMaxFails, time.Duration(cfg.EnrollBanHours)*time.Hour, "admin_bans.json"),
-		closed:     make(chan struct{}),
+		cfg:           cfg,
+		fs:            webFS,
+		mux:           http.NewServeMux(),
+		servers:       map[string]*serverState{},
+		series:        NewSeriesStore(filepath.Join(cfg.DataDir, "series")),
+		roll:          newGlobalRolling(43200), // 30 days * 1440 minutes
+		dedup:         newDedupStore(10 * time.Minute),
+		secrets:       map[string]string{},
+		enrollBans:    newBanStore(cfg.EnrollMaxFails, time.Duration(cfg.EnrollBanHours)*time.Hour, "enroll_bans.json"),
+		adminBans:     newBanStore(cfg.EnrollMaxFails, time.Duration(cfg.EnrollBanHours)*time.Hour, "admin_bans.json"),
+		adminSessions: map[string]adminSession{},
+		closed:        make(chan struct{}),
 	}
 	s.ingestKey = common.DeriveKeySHA256(cfg.IngestToken)
 
@@ -111,10 +125,14 @@ func (s *Service) routes() {
 	s.mux.HandleFunc("/api/snapshot", s.handleSnapshot)
 	s.mux.HandleFunc("/api/series", s.handleSeries)
 
+	s.mux.HandleFunc("/api/admin/login", s.handleAdminLogin)
+	s.mux.HandleFunc("/api/admin/logout", s.handleAdminLogout)
+	s.mux.HandleFunc("/api/admin/session", s.handleAdminSession)
 	s.mux.HandleFunc("/api/admin/settings", s.handleAdminSettings)
 	s.mux.HandleFunc("/api/admin/servers", s.handleAdminServers)
 	s.mux.HandleFunc("/api/admin/server", s.handleAdminServerUpsert)
 	s.mux.HandleFunc("/api/admin/server_patch", s.handleAdminServerPatch)
+	s.mux.HandleFunc("/api/admin/issue_agent_token", s.handleAdminIssueAgentToken)
 	s.mux.HandleFunc("/api/admin/bans", s.handleAdminBans)
 	s.mux.HandleFunc("/api/admin/admin_bans", s.handleAdminAdminBans)
 
@@ -125,14 +143,36 @@ func (s *Service) routes() {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		if !s.isAdminAuthedBySession(r) {
+			http.Redirect(w, r, "/admin/login?next="+url.QueryEscape("/admin"), http.StatusTemporaryRedirect)
+			return
+		}
 		r2 := r.Clone(r.Context())
 		u := *r.URL
 		u.Path = "/admin.html"
 		r2.URL = &u
 		static.ServeHTTP(w, r2)
 	})
+	s.mux.HandleFunc("/admin/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if s.isAdminAuthedBySession(r) {
+			http.Redirect(w, r, "/admin", http.StatusTemporaryRedirect)
+			return
+		}
+		r2 := r.Clone(r.Context())
+		u := *r.URL
+		u.Path = "/login.html"
+		r2.URL = &u
+		static.ServeHTTP(w, r2)
+	})
 	s.mux.HandleFunc("/admin/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin", http.StatusPermanentRedirect)
+	})
+	s.mux.HandleFunc("/admin.html", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/admin", http.StatusTemporaryRedirect)
 	})
 	s.mux.Handle("/", static)
 }
@@ -284,10 +324,18 @@ func (s *Service) authorizeAdmin(w http.ResponseWriter, r *http.Request) bool {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return false
 	}
-	expected := s.cfg.AdminToken
-	got := r.Header.Get("X-Admin-Token")
+	if s.isAdminAuthedBySession(r) {
+		return true
+	}
+
+	expected := s.adminExpectedPassword()
+	got := strings.TrimSpace(r.Header.Get("X-Admin-Token"))
 	if got == "" {
-		got = r.URL.Query().Get("x-admin-token")
+		got = strings.TrimSpace(r.URL.Query().Get("x-admin-token"))
+	}
+	if got == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
 	}
 	if got == expected {
 		if s.adminBans != nil {
@@ -325,6 +373,72 @@ func (s *Service) authorizeAdmin(w http.ResponseWriter, r *http.Request) bool {
 
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
 	return false
+}
+
+func (s *Service) adminExpectedPassword() string {
+	if s == nil {
+		return ""
+	}
+	if strings.TrimSpace(s.cfg.AdminPassword) != "" {
+		return strings.TrimSpace(s.cfg.AdminPassword)
+	}
+	return strings.TrimSpace(s.cfg.AdminToken)
+}
+
+func (s *Service) isAdminAuthedBySession(r *http.Request) bool {
+	if s == nil || r == nil {
+		return false
+	}
+	c, err := r.Cookie(adminSessionCookieName)
+	if err != nil || c == nil {
+		return false
+	}
+	sid := strings.TrimSpace(c.Value)
+	if sid == "" {
+		return false
+	}
+	now := time.Now()
+	s.adminSessionsMu.Lock()
+	defer s.adminSessionsMu.Unlock()
+	sess, ok := s.adminSessions[sid]
+	if !ok {
+		return false
+	}
+	if !sess.ExpiresAt.IsZero() && now.After(sess.ExpiresAt) {
+		delete(s.adminSessions, sid)
+		return false
+	}
+	return true
+}
+
+func (s *Service) newAdminSession(username string) (string, time.Time, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", time.Time{}, err
+	}
+	sid := hex.EncodeToString(b)
+	exp := time.Now().Add(adminSessionTTL)
+	s.adminSessionsMu.Lock()
+	s.adminSessions[sid] = adminSession{User: username, ExpiresAt: exp}
+	s.adminSessionsMu.Unlock()
+	return sid, exp, nil
+}
+
+func (s *Service) deleteAdminSession(r *http.Request) {
+	if s == nil || r == nil {
+		return
+	}
+	c, err := r.Cookie(adminSessionCookieName)
+	if err != nil || c == nil {
+		return
+	}
+	sid := strings.TrimSpace(c.Value)
+	if sid == "" {
+		return
+	}
+	s.adminSessionsMu.Lock()
+	delete(s.adminSessions, sid)
+	s.adminSessionsMu.Unlock()
 }
 
 func (s *Service) stealthIngestUnauthorizedEnabled() bool {

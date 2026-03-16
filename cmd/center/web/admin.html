@@ -6,7 +6,7 @@
     <title>控制面板</title>
     <link rel="stylesheet" href="/app.css" />
   </head>
-  <body class="admin-locked">
+  <body>
     <div class="halftone" aria-hidden="true"></div>
 
     <div class="topwrap">
@@ -14,25 +14,29 @@
         <div class="top-left">
           <a class="pill link" href="/" title="返回">← 返回</a>
         </div>
-        <div class="top-stats" style="justify-content:center">
-          <div class="stat" style="min-width:280px">
-            <div class="label">控制面板登录（管理密码）</div>
-            <div class="value">
-              <input id="tokenInput" class="input" placeholder="管理密码（X-Admin-Token）" />
-              <button class="pill" id="loginBtn" type="button">登录</button>
-              <button class="pill" id="logoutBtn" type="button" style="background:#fff">退出</button>
-            </div>
-          </div>
+        <div class="top-stats" style="justify-content:center"></div>
+        <div class="top-right">
+          <button class="pill" id="logoutBtn" type="button" style="background:#fff">退出</button>
         </div>
-        <div class="top-right"></div>
       </header>
       <div class="tape" aria-hidden="true">
         <div class="tape-inner animate-marquee" id="tapeInner"></div>
       </div>
     </div>
 
-    <main class="grid admin-grid">
-      <section class="card admin-card">
+    <main class="admin-layout">
+      <aside class="admin-side">
+        <nav class="card admin-nav">
+          <div class="nav-title">控制面板</div>
+          <a class="nav-link" href="#sec-settings">全局设置</a>
+          <a class="nav-link" href="#sec-servers">服务器</a>
+          <a class="nav-link" href="#sec-bans-enroll">黑名单（接入）</a>
+          <a class="nav-link" href="#sec-bans-admin">黑名单（管理）</a>
+        </nav>
+      </aside>
+
+      <div class="admin-main">
+      <section class="card admin-card" id="sec-settings">
         <div class="card-head">
           <div class="title-row">
             <div class="server-name">全局设置</div>
@@ -72,7 +76,7 @@
         </div>
       </section>
 
-      <section class="card admin-card wide">
+      <section class="card admin-card wide" id="sec-servers">
         <div class="card-head">
           <div class="title-row">
             <div class="server-name">已探测到的服务器</div>
@@ -81,6 +85,7 @@
         </div>
         <div class="metrics">
           <div class="admin-toolbar">
+            <button class="pill" id="addServerBtn" type="button" style="background:#fff">添加服务器</button>
             <button class="pill" id="refreshBtn" type="button">刷新</button>
             <input class="input" id="filterInput" placeholder="搜索：ID / 名称 / 地区" />
           </div>
@@ -113,7 +118,7 @@
         </div>
       </section>
 
-      <section class="card admin-card wide">
+      <section class="card admin-card wide" id="sec-bans-enroll">
         <div class="card-head">
           <div class="title-row">
             <div class="server-name">黑名单（接入密码尝试）</div>
@@ -144,7 +149,7 @@
         </div>
       </section>
 
-      <section class="card admin-card wide">
+      <section class="card admin-card wide" id="sec-bans-admin">
         <div class="card-head">
           <div class="title-row">
             <div class="server-name">黑名单（管理密码尝试）</div>
@@ -174,6 +179,7 @@
           <div class="sub" id="adminBansMsg"></div>
         </div>
       </section>
+      </div>
     </main>
 
     <div class="modal hidden" id="listModal" role="dialog" aria-modal="true" aria-hidden="true">

@@ -59,8 +59,8 @@
     <main class="grid" id="cards"></main>
 
     <template id="cardTpl">
-      <section class="card">
-        <button class="pill pill-sm ctrl-toggle" type="button" title="切换受控模式（需要管理密码）"></button>
+      <section class="card probe-card">
+        <button class="pill pill-sm ctrl-toggle" type="button" title="切换受控模式（需要登录控制面板）"></button>
         <div class="ctrl-overlay hidden"></div>
         <div class="card-inner">
         <div class="card-head">
@@ -77,9 +77,35 @@
             <div class="sub traffic-renew" data-widget="traffic_renew"></div>
           </div>
           <div class="meta-row">
-            <div class="meta-item" data-widget="meta"><span class="ico">🖥</span><span class="cores">-</span></div>
-            <div class="meta-item" data-widget="meta"><span class="ico">🧠</span><span class="mem">-</span></div>
-            <div class="meta-item" data-widget="meta"><span class="ico">💽</span><span class="disk">-</span></div>
+            <div class="meta-item meta-cpu" data-widget="meta">
+              <span class="ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="7" y="7" width="10" height="10" rx="2"></rect>
+                  <rect x="10" y="10" width="4" height="4" rx="1"></rect>
+                  <path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4"></path>
+                </svg>
+              </span>
+              <span class="cores">-</span>
+            </div>
+            <div class="meta-item meta-mem" data-widget="meta">
+              <span class="ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="7" width="18" height="10" rx="2"></rect>
+                  <path d="M7 7v10M11 7v10M15 7v10M19 7v10"></path>
+                </svg>
+              </span>
+              <span class="mem">-</span>
+            </div>
+            <div class="meta-item meta-disk" data-widget="meta">
+              <span class="ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="4" y="6" width="16" height="12" rx="2"></rect>
+                  <path d="M4 10h16"></path>
+                  <circle cx="8" cy="15" r="1"></circle>
+                </svg>
+              </span>
+              <span class="disk">-</span>
+            </div>
           </div>
         </div>
 
@@ -93,7 +119,7 @@
               <div class="m-bar"><div class="fill cpu"></div></div>
               <div class="m-right"><span class="pct cpu-pct">0%</span></div>
             </div>
-            <canvas class="spark" width="220" height="26"></canvas>
+            <canvas class="spark" width="240" height="32"></canvas>
           </div>
 
           <div class="metric" data-metric="mem" data-widget="mem">
@@ -105,7 +131,7 @@
               <div class="m-bar"><div class="fill mem"></div></div>
               <div class="m-right"><span class="pct mem-pct">0%</span></div>
             </div>
-            <canvas class="spark" width="220" height="26"></canvas>
+            <canvas class="spark" width="240" height="32"></canvas>
           </div>
 
           <div class="metric" data-metric="swap" data-widget="swap">
@@ -117,7 +143,7 @@
               <div class="m-bar"><div class="fill swap"></div></div>
               <div class="m-right"><span class="pct swap-pct">0%</span></div>
             </div>
-            <canvas class="spark" width="220" height="26"></canvas>
+            <canvas class="spark" width="240" height="32"></canvas>
           </div>
 
           <div class="metric" data-metric="disk" data-widget="disk">
@@ -129,7 +155,7 @@
               <div class="m-bar"><div class="fill disk"></div></div>
               <div class="m-right"><span class="pct disk-pct">0%</span></div>
             </div>
-            <canvas class="spark" width="220" height="26"></canvas>
+            <canvas class="spark" width="240" height="32"></canvas>
           </div>
 
           <div class="metric" data-metric="net" data-widget="net">
@@ -139,7 +165,7 @@
               </div>
               <div class="m-right mono"><span class="up">↑</span> <span class="net-up">0</span> <span class="down">↓</span> <span class="net-down">0</span></div>
             </div>
-            <canvas class="spark" width="220" height="26"></canvas>
+            <canvas class="spark" width="240" height="32"></canvas>
           </div>
 
           <div class="metric" data-metric="traffic" data-widget="traffic">
@@ -153,7 +179,7 @@
               <div class="quota-bar"><div class="quota-fill"></div></div>
               <div class="quota-text sub"></div>
             </div>
-            <canvas class="spark" width="220" height="26"></canvas>
+            <canvas class="spark" width="240" height="32"></canvas>
           </div>
 
           <div class="metric" data-metric="load" data-widget="load">
@@ -163,7 +189,7 @@
               </div>
               <div class="m-right mono"><span class="load">0.00 | 0.00 | 0.00</span></div>
             </div>
-            <canvas class="spark" width="220" height="26"></canvas>
+            <canvas class="spark" width="240" height="32"></canvas>
           </div>
 
           <div class="footer">

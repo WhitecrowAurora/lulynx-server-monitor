@@ -3,8 +3,6 @@ package agent
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,8 +11,6 @@ import (
 	"runtime"
 	"sync"
 	"time"
-
-	"github.com/WhitecrowAurora/lulynx-server-monitor/internal/common"
 )
 
 type runtimeConfig struct {
@@ -44,7 +40,6 @@ func Run(ctx context.Context, cfg Config) error {
 		Timeout: 8 * time.Second,
 	}
 	ingestURL := stringsTrimRightSlash(cfg.CentralURL) + "/api/ingest"
-	encKey := common.DeriveKeySHA256(cfg.IngestToken)
 
 	intervalCh := make(chan time.Duration, 1)
 	ctrl := newControlManager(cfg.AgentID, cfg.IngestToken, rc, intervalCh)
@@ -91,7 +86,7 @@ func Run(ctx context.Context, cfg Config) error {
 				payload.Ports = probePorts(portHost, ports)
 			}
 
-			respCfg, err := pushOnce(ctx, client, ingestURL, cfg.IngestToken, cfg.EncryptEnabled, encKey, payload)
+			respCfg, err := pushOnce(ctx, client, ingestURL, cfg.IngestToken, payload)
 			if err == nil {
 				rc.mu.Lock()
 				if respCfg.Config.PortProbeHost != "" {
@@ -138,42 +133,20 @@ func notifyInterval(ch chan time.Duration, d time.Duration) {
 	}
 }
 
-func pushOnce(ctx context.Context, client *http.Client, url, token string, encrypt bool, key [32]byte, payload IngestPayload) (ConfigResponse, error) {
+func pushOnce(ctx context.Context, client *http.Client, url, token string, payload IngestPayload) (ConfigResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
 		return ConfigResponse{}, err
 	}
-	if !encrypt {
-		b, err := json.Marshal(payload)
-		if err != nil {
-			return ConfigResponse{}, err
-		}
-		req.Body = io.NopCloser(bytes.NewReader(b))
-		req.ContentLength = int64(len(b))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Ingest-Token", token)
-		req.Header.Set("X-Agent-ID", payload.AgentID)
-	} else {
-		plain, err := json.Marshal(payload)
-		if err != nil {
-			return ConfigResponse{}, err
-		}
-		msgID := make([]byte, 16)
-		if _, err := rand.Read(msgID); err != nil {
-			return ConfigResponse{}, err
-		}
-		nonce, ct, err := common.EncryptAESGCM(key, []byte(payload.AgentID), plain)
-		if err != nil {
-			return ConfigResponse{}, err
-		}
-		req.Body = io.NopCloser(bytes.NewReader(ct))
-		req.ContentLength = int64(len(ct))
-		req.Header.Set("Content-Type", "application/octet-stream")
-		req.Header.Set("X-Ingest-Enc", "aesgcm")
-		req.Header.Set("X-Agent-ID", payload.AgentID)
-		req.Header.Set("X-Nonce", base64.RawStdEncoding.EncodeToString(nonce))
-		req.Header.Set("X-Msg-ID", base64.RawStdEncoding.EncodeToString(msgID))
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return ConfigResponse{}, err
 	}
+	req.Body = io.NopCloser(bytes.NewReader(b))
+	req.ContentLength = int64(len(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Ingest-Token", token)
+	req.Header.Set("X-Agent-ID", payload.AgentID)
 
 	resp, err := client.Do(req)
 	if err != nil {

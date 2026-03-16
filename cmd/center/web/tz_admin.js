@@ -35,7 +35,6 @@
   ];
 
   const adminState = {
-    token: U.store.get("admin_token") || "",
     settings: null,
     servers: [],
     bans: [],
@@ -58,18 +57,10 @@
     }
   }
 
-  function tokenOk() {
-    return !!adminState.token;
-  }
-
   function inferCenterPort() {
     const p = parseInt(location.port || "", 10);
     if (Number.isInteger(p) && p > 0 && p <= 65535) return p;
     return location.protocol === "https:" ? 443 : 80;
-  }
-
-  function setLocked(locked) {
-    document.body.classList.toggle("admin-locked", !!locked);
   }
 
   function showMsg(el, msg) {
@@ -81,9 +72,13 @@
 
   async function apiGet(path) {
     const res = await fetch(path, {
-      headers: adminState.token ? { "X-Admin-Token": adminState.token } : {},
+      credentials: "same-origin",
       cache: "no-store",
     });
+    if (res.status === 401) {
+      location.href = `/admin/login?next=${encodeURIComponent("/admin")}`;
+      throw new Error("unauthorized");
+    }
     if (!res.ok) throw new Error(`${path} ${res.status}`);
     return res.json();
   }
@@ -93,10 +88,14 @@
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(adminState.token ? { "X-Admin-Token": adminState.token } : {}),
       },
+      credentials: "same-origin",
       body: JSON.stringify(body),
     });
+    if (res.status === 401) {
+      location.href = `/admin/login?next=${encodeURIComponent("/admin")}`;
+      throw new Error("unauthorized");
+    }
     if (!res.ok) throw new Error(`${path} ${res.status}`);
     return res.json();
   }
@@ -341,7 +340,6 @@
   }
 
   async function refreshAll() {
-    if (!tokenOk()) return;
     setTape("控制面板 /// 正在加载... ///");
     await loadSettings();
     await loadServers();
@@ -354,47 +352,13 @@
   }
 
   function bind() {
-    q("tokenInput").value = adminState.token;
-
-    q("loginBtn").addEventListener("click", async () => {
-      adminState.token = q("tokenInput").value.trim();
-      if (!adminState.token) {
-        showMsg(q("settingsMsg"), "请输入管理密码");
-        setLocked(true);
-        return;
-      }
-      U.store.set("admin_token", adminState.token);
+    q("logoutBtn")?.addEventListener("click", async () => {
       try {
-        setLocked(true);
-        await refreshAll();
-        setLocked(false);
-        showMsg(q("settingsMsg"), "登录成功");
+        await fetch("/api/admin/logout", { method: "POST", credentials: "same-origin" });
       } catch {
-        showMsg(q("settingsMsg"), "登录失败（管理密码不正确？）");
-        adminState.token = "";
-        U.store.del("admin_token");
-        setLocked(true);
-        setTape("控制面板 /// 请先登录 ///");
+        // ignore
       }
-    });
-
-    q("logoutBtn").addEventListener("click", () => {
-      adminState.token = "";
-      U.store.del("admin_token");
-      q("tokenInput").value = "";
-      q("serversTable").querySelector("tbody").textContent = "";
-      const bt = q("bansTable");
-      if (bt) {
-        const btb = bt.querySelector("tbody");
-        if (btb) btb.textContent = "";
-      }
-      const at = q("adminBansTable");
-      if (at) {
-        const atb = at.querySelector("tbody");
-        if (atb) atb.textContent = "";
-      }
-      setLocked(true);
-      setTape("控制面板 /// 请先登录 ///");
+      location.href = `/admin/login?next=${encodeURIComponent("/admin")}`;
     });
 
     q("saveSettings").addEventListener("click", async () => {
@@ -433,6 +397,31 @@
           q("setTape").value = out.join(",");
         },
       });
+    });
+
+    q("addServerBtn")?.addEventListener("click", async () => {
+      const agentIDRaw = window.prompt("服务器 ID（唯一，例如 la-01）：", "");
+      if (!agentIDRaw) return;
+      const agentID = agentIDRaw.trim();
+      if (!agentID) return;
+      const nameRaw = window.prompt("显示名称（可选）：", agentID);
+      const name = (nameRaw || "").trim();
+      try {
+        const data = await apiPost("/api/admin/issue_agent_token", { agent_id: agentID, name });
+        const tok = (data && data.ingest_token) || "";
+        if (tok) {
+          try {
+            await navigator.clipboard.writeText(tok);
+          } catch {
+            // ignore
+          }
+          window.prompt("已生成节点密码（Ingest Token），复制后填到客户端：", tok);
+        }
+        showMsg(q("serversMsg"), `已生成：${agentID}`);
+        await refreshAll();
+      } catch (e) {
+        showMsg(q("serversMsg"), `生成失败：${e.message || e}`);
+      }
     });
 
     q("refreshBtn").addEventListener("click", async () => {
@@ -490,18 +479,10 @@
 
   function init() {
     bind();
-    if (tokenOk()) {
-      setLocked(true);
-      refreshAll()
-        .then(() => setLocked(false))
-        .catch(() => {
-          setLocked(true);
-          setTape("控制面板 /// 请检查管理密码 ///");
-        });
-    } else {
-      setLocked(true);
-      setTape("控制面板 /// 请先登录 ///");
-    }
+    refreshAll().catch((e) => {
+      showMsg(q("settingsMsg"), `加载失败：${e.message || e}`);
+      setTape("控制面板 /// 加载失败 ///");
+    });
   }
 
   TZ.admin = { init };

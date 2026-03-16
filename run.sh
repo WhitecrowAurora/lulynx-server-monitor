@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_NAME="Lulynx Server Status"
-SCRIPT_VERSION="v0.3.7"
+SCRIPT_VERSION="v0.3.12"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 SCRIPT_PATH="$SCRIPT_DIR/$(basename -- "${BASH_SOURCE[0]}")"
@@ -636,6 +636,26 @@ install_local() {
   echo "$(L "已安装：" "Installed: ")$dst"
 }
 
+update_binary() {
+  local mode="$1"
+  local binName; binName="$(binary_name_for "$mode")"
+  local candidates=()
+  candidates+=("$binName")
+  local c
+  for c in $(binary_candidates_for "$mode"); do
+    if [ "$c" != "$binName" ]; then
+      candidates+=("$c")
+    fi
+  done
+  local src
+  src="$(find_local_binary "${candidates[@]}" || true)"
+  if [ -n "${src:-}" ] && [ -f "$src" ]; then
+    install_local "$mode"
+    return 0
+  fi
+  download_binary "$mode"
+}
+
 ensure_binary_installed() {
   local mode="$1"
   local binName; binName="$(binary_name_for "$mode")"
@@ -788,10 +808,11 @@ write_center_config() {
   local SUDO; SUDO="$(sudo_prefix)"
   ensure_dirs
 
-  # Keep prompts minimal: only ask listen/data. Tokens are generated/reused.
+  # Keep prompts minimal: only ask listen/data (+ admin login on first init). Passwords are generated/reused.
   local cfg; cfg="$(config_path_for center)"
   local listen_addr data_dir ingest_token admin_token enroll_token allow_auto stealth
   local had_ingest="true" had_admin="true" had_enroll="true"
+  local admin_changed="false" admin_password_changed="false"
   local def_listen def_data
   def_listen="$(json_get_string "$cfg" "listen_addr" || true)"
   def_data="$(json_get_string "$cfg" "data_dir" || true)"
@@ -799,7 +820,12 @@ write_center_config() {
   if [ -z "$def_data" ]; then def_data="$DATA_DIR_DEFAULT"; fi
 
   ingest_token="$(json_get_string "$cfg" "ingest_token" || true)"
-  admin_token="$(json_get_string "$cfg" "admin_token" || true)"
+  local admin_user admin_password
+  admin_user="$(json_get_string "$cfg" "admin_user" || true)"
+  admin_password="$(json_get_string "$cfg" "admin_password" || true)"
+  if [ -z "$admin_password" ]; then
+    admin_password="$(json_get_string "$cfg" "admin_token" || true)"
+  fi
   enroll_token="$(json_get_string "$cfg" "enroll_token" || true)"
   allow_auto="$(json_get_bool "$cfg" "allow_auto_register" || true)"
   stealth="$(json_get_bool "$cfg" "stealth_ingest_unauthorized" || true)"
@@ -836,10 +862,48 @@ write_center_config() {
   fi
 
   if [ -z "$ingest_token" ]; then had_ingest="false"; ingest_token="$(gen_token)"; fi
-  if [ -z "$admin_token" ]; then had_admin="false"; admin_token="$(gen_token)"; fi
-  if [ -z "$enroll_token" ]; then had_enroll="false"; enroll_token="$admin_token"; fi
+  if [ -z "$admin_user" ]; then admin_user="admin"; fi
+  if [ -z "$admin_password" ]; then
+    had_admin="false"
+    admin_changed="true"
+    admin_password_changed="true"
+    admin_user="$(prompt "$(L "管理面板用户名" "Admin username")" "$admin_user")"
+    admin_password="$(prompt "$(L "管理面板密码（留空自动生成）" "Admin password (leave empty to auto-generate)")" "")"
+    if [ -z "$admin_password" ]; then
+      admin_password="$(gen_token)"
+    fi
+  else
+    local change_admin
+    change_admin="$(prompt_yesno "$(L "是否修改管理面板账号/密码？" "Change admin username/password?")" "n")"
+    if [ "$change_admin" = "true" ]; then
+      local old_admin_password new_admin_password
+      old_admin_password="$admin_password"
+      admin_changed="true"
+      admin_user="$(prompt "$(L "管理面板用户名" "Admin username")" "$admin_user")"
+      new_admin_password="$(prompt "$(L "管理面板密码（留空保持不变；输入 AUTO 自动生成）" "Admin password (empty=keep; AUTO=generate)")" "")"
+      case "${new_admin_password:-}" in
+        "" )
+          # keep
+          ;;
+        AUTO|auto|Auto )
+          admin_password="$(gen_token)"
+          admin_password_changed="true"
+          ;;
+        * )
+          admin_password="$new_admin_password"
+          admin_password_changed="true"
+          ;;
+      esac
 
-  if [ -z "$ingest_token" ] || [ -z "$admin_token" ]; then
+      # Keep enroll_token in sync if it was sharing the same secret.
+      if [ -n "$enroll_token" ] && [ "$enroll_token" = "$old_admin_password" ] && [ "$admin_password_changed" = "true" ]; then
+        enroll_token="$admin_password"
+      fi
+    fi
+  fi
+  if [ -z "$enroll_token" ]; then had_enroll="false"; enroll_token=""; fi
+
+  if [ -z "$ingest_token" ] || [ -z "$admin_password" ]; then
     echo "$(L "错误：密码生成失败（建议安装 openssl）或请手动输入。" "ERROR: failed to generate passwords (install openssl) or input manually.")" >&2
     exit 1
   fi
@@ -852,7 +916,8 @@ write_center_config() {
   "listen_addr": "$(json_escape "$listen_addr")",
   "data_dir": "$(json_escape "$data_dir")",
   "ingest_token": "$(json_escape "$ingest_token")",
-  "admin_token": "$(json_escape "$admin_token")",
+  "admin_user": "$(json_escape "$admin_user")",
+  "admin_password": "$(json_escape "$admin_password")",
   "enroll_token": "$(json_escape "$enroll_token")",
   "enroll_max_fails": 5,
   "enroll_ban_hours": 8,
@@ -867,14 +932,19 @@ EOF
   $SUDO install -m 0600 "$tmp" "$cfg"
   rm -f "$tmp"
   echo "$(L "已写入配置：" "Wrote config: ")$cfg"
-  if [ "$had_admin" = "false" ] || [ "$had_ingest" = "false" ] || [ "$had_enroll" = "false" ]; then
-    echo "$(L "管理面板登录账号：" "Admin username: ")admin"
-    echo "$(L "中心密码（管理/接入，请保存）：" "Center password (admin/enroll, save it): ")$admin_token"
-    if [ -n "$enroll_token" ] && [ "$enroll_token" != "$admin_token" ]; then
+  if [ "$admin_changed" = "true" ] || [ "$had_ingest" = "false" ] || [ "$had_enroll" = "false" ]; then
+    echo "$(L "管理面板用户名：" "Admin username: ")$admin_user"
+    if [ "$admin_password_changed" = "true" ] || [ "$had_admin" = "false" ]; then
+      echo "$(L "管理面板密码（请保存）：" "Admin password (save it): ")$admin_password"
+    fi
+    if [ -n "$enroll_token" ] && [ "$enroll_token" != "$admin_password" ]; then
       echo "$(L "客户端接入密码（覆盖中心密码）：" "Probe enroll password (override): ")$enroll_token"
     fi
+  fi
+  if [ "$admin_changed" = "true" ]; then
+    echo "$(L "提示：如修改了管理账号/密码，请重启中心端以生效（菜单 6. 重启 服务器）。" "Note: if you changed admin login, restart the center to apply (menu 6 Restart Server).")"
   else
-    echo "$(L "提示：密码未变更（如需查看：./run.sh server show-config 或 cat 配置文件）。" "Note: passwords unchanged (view via ./run.sh server show-config or cat the config file).")"
+    echo "$(L "提示：管理面板账号/密码未变更（如需查看：./run.sh server show-config 或 cat 配置文件）。" "Note: admin login unchanged (view via ./run.sh server show-config or cat the config file).")"
   fi
 }
 
@@ -887,7 +957,7 @@ write_center_config_quick() {
   local SUDO; SUDO="$(sudo_prefix)"
   ensure_dirs
 
-  local port data_dir listen_addr ingest_token admin_token enroll_token
+  local port data_dir listen_addr ingest_token admin_user admin_password enroll_token
 
   port="$(prompt "$(L "监听端口" "Listen port")" "38088")"
   if ! validate_port "$port"; then
@@ -903,11 +973,15 @@ write_center_config_quick() {
     exit 1
   fi
 
-  ingest_token="$(gen_token)"
-  admin_token="$(gen_token)"
-  enroll_token="$admin_token"
+  admin_user="$(prompt "$(L "管理面板用户名" "Admin username")" "admin")"
+  ingest_token="$(prompt "$(L "中心密码（用于管理面板登录 + 客户端上报）（留空自动生成）" "Center password (for /admin login + probe push) (empty=auto-generate)")" "")"
+  if [ -z "$ingest_token" ]; then
+    ingest_token="$(gen_token)"
+  fi
+  admin_password="$ingest_token"
+  enroll_token=""
 
-  if [ -z "$ingest_token" ] || [ -z "$admin_token" ]; then
+  if [ -z "$ingest_token" ] || [ -z "$admin_password" ]; then
     echo "$(L "错误：密码生成失败（建议安装 openssl）或请手动在配置文件中填写。" "ERROR: failed to generate passwords (install openssl) or fill them manually in config.")" >&2
     exit 1
   fi
@@ -921,7 +995,8 @@ write_center_config_quick() {
   "listen_addr": "$(json_escape "$listen_addr")",
   "data_dir": "$(json_escape "$data_dir")",
   "ingest_token": "$(json_escape "$ingest_token")",
-  "admin_token": "$(json_escape "$admin_token")",
+  "admin_user": "$(json_escape "$admin_user")",
+  "admin_password": "$(json_escape "$admin_password")",
   "enroll_token": "$(json_escape "$enroll_token")",
   "enroll_max_fails": 5,
   "enroll_ban_hours": 8,
@@ -939,8 +1014,8 @@ EOF
   echo "$(L "已写入配置：" "Wrote config: ")$cfg"
   echo "$(L "面板地址：" "Dashboard: ")http://127.0.0.1:${port}/ $(L "（外网请替换为服务器 IP/域名）" "(replace with server IP/domain for remote access)")"
   echo "$(L "控制面板：" "Admin panel: ")http://127.0.0.1:${port}/admin $(L "（外网请替换为服务器 IP/域名）" "(replace with server IP/domain for remote access)")"
-  echo "$(L "管理面板登录账号：" "Admin username: ")admin"
-  echo "$(L "中心密码（管理/接入，请保存）：" "Center password (admin/enroll, save it): ")$admin_token"
+  echo "$(L "管理面板用户名：" "Admin username: ")$admin_user"
+  echo "$(L "中心密码（请保存）：" "Center password (save it): ")$admin_password"
 }
 
 first_run_wizard() {
@@ -1010,7 +1085,7 @@ write_agent_config_quick() {
 
   local cfg; cfg="$(config_path_for agent)"
 
-  local agent_id name central_url ingest_token enroll_token encrypt_enabled collect_interval disk_mount net_iface tcp_conn_enabled
+  local agent_id name central_url ingest_token enroll_token collect_interval disk_mount net_iface tcp_conn_enabled
   local port_probe_enabled port_probe_host ports_json
 
   agent_id="$(default_agent_id)"
@@ -1022,13 +1097,12 @@ write_agent_config_quick() {
     exit 1
   fi
 
-  enroll_token="$(prompt "$(L "中心密码（管理/接入）" "Center password (admin/enroll)")" "")"
-  if [ -z "$enroll_token" ]; then
+  ingest_token="$(prompt "$(L "上报密码（节点密码）" "Ingest password (node password)")" "")"
+  if [ -z "$ingest_token" ]; then
     echo "$(L "错误：密码必填。" "ERROR: password required.")" >&2
     exit 1
   fi
-  ingest_token=""
-  encrypt_enabled="true"
+  enroll_token=""
 
   collect_interval=5
   disk_mount="/"
@@ -1046,7 +1120,6 @@ write_agent_config_quick() {
   "central_url": "$(json_escape "$central_url")",
   "ingest_token": "$(json_escape "$ingest_token")",
   "enroll_token": "$(json_escape "$enroll_token")",
-  "encrypt_enabled": $encrypt_enabled,
   "collect_interval_seconds": $collect_interval,
   "disk_mount": "$(json_escape "$disk_mount")",
   "net_iface": "$(json_escape "$net_iface")",
@@ -1283,7 +1356,7 @@ read_center_data_dir() {
 validate_center_config() {
   local cfg; cfg="$(config_path_for center)"
   if [ ! -f "$cfg" ]; then echo "$(L "找不到配置：" "Config not found: ")$cfg" >&2; return 1; fi
-  local need=("ingest_token" "admin_token" "data_dir" "listen_addr")
+  local need=("ingest_token" "data_dir" "listen_addr")
   local k
   for k in "${need[@]}"; do
     if ! grep -q "\"$k\"" "$cfg"; then
@@ -1291,6 +1364,10 @@ validate_center_config() {
       return 1
     fi
   done
+  if ! grep -q "\"admin_password\"" "$cfg" && ! grep -q "\"admin_token\"" "$cfg"; then
+    echo "$(L "配置缺少字段：" "Missing config field: ")admin_password" >&2
+    return 1
+  fi
   local port
   port="$(read_center_listen_port || true)"
   if [ -z "$port" ]; then
@@ -1336,10 +1413,6 @@ write_agent_config() {
   local def_central
   def_central="$(json_get_string "$cfg" "central_url" || true)"
 
-  local def_encrypt
-  def_encrypt="$(json_get_bool "$cfg" "encrypt_enabled" || true)"
-  if [ -z "$def_encrypt" ]; then def_encrypt="true"; fi
-
   local def_collect def_mount def_iface def_tcp def_port_probe def_port_host def_ports_raw
   def_collect="$(json_get_string "$cfg" "collect_interval_seconds" || true)"
   if [ -z "$def_collect" ]; then def_collect="5"; fi
@@ -1354,7 +1427,7 @@ write_agent_config() {
   if [ -z "$def_port_host" ]; then def_port_host="127.0.0.1"; fi
   def_ports_raw="$(json_get_int_array_csv "$cfg" "ports" || true)"
 
-  local central_url password ingest_token enroll_token encrypt_enabled collect_interval disk_mount net_iface tcp_conn_enabled
+  local central_url password ingest_token enroll_token collect_interval disk_mount net_iface tcp_conn_enabled
   local port_probe_enabled port_probe_host ports_raw advanced
 
   central_url="$(prompt "$(L "中心地址（例如 1.2.3.4:38088 或 http://1.2.3.4:38088）" "Central URL (e.g. 1.2.3.4:38088 or http://1.2.3.4:38088)")" "$def_central")"
@@ -1365,29 +1438,19 @@ write_agent_config() {
   fi
 
   # Password: keep empty by default to avoid echoing secrets in interactive prompts.
-  password="$(prompt "$(L "中心密码（留空保持不变）" "Center password (leave empty to keep)")" "")"
+  password="$(prompt "$(L "上报密码（留空保持不变）" "Ingest password (leave empty to keep)")" "")"
   if [ -z "$password" ]; then
     ingest_token="$(json_get_string "$cfg" "ingest_token" || true)"
     enroll_token="$(json_get_string "$cfg" "enroll_token" || true)"
   else
-    local is_enroll
-    is_enroll="$(prompt_yesno "$(L "该密码是否为“接入密码”(Enroll)？（推荐）" "Is this an enroll password? (recommended)")" "y")"
-    if [ "$is_enroll" = "true" ]; then
-      enroll_token="$password"
-      ingest_token=""
-    else
-      ingest_token="$password"
-      enroll_token=""
-    fi
+    # Simplest mode: treat the entered password as ingest_token and disable enroll.
+    ingest_token="$password"
+    enroll_token=""
   fi
   if [ -z "${ingest_token:-}" ] && [ -z "${enroll_token:-}" ]; then
-    echo "$(L "错误：密码必填（接入密码或上报密码至少一个）。" "ERROR: password required (enroll or ingest).")" >&2
+    echo "$(L "错误：密码必填。" "ERROR: password required.")" >&2
     exit 1
   fi
-
-  local def_enc_yn="y"
-  if [ "$def_encrypt" = "false" ]; then def_enc_yn="n"; fi
-  encrypt_enabled="$(prompt_yesno "$(L "开启加密上报（AES-GCM）" "Enable encrypted push (AES-GCM)")" "$def_enc_yn")"
 
   advanced="$(prompt_yesno "$(L "高级设置（可选：采集间隔/磁盘/网卡/端口探活）？" "Advanced settings (optional: interval/disk/iface/port probe)?")" "n")"
 
@@ -1439,7 +1502,6 @@ write_agent_config() {
   "central_url": "$(json_escape "$central_url")",
   "ingest_token": "$(json_escape "${ingest_token:-}")",
   "enroll_token": "$(json_escape "${enroll_token:-}")",
-  "encrypt_enabled": $encrypt_enabled,
   "collect_interval_seconds": $collect_interval,
   "disk_mount": "$(json_escape "$disk_mount")",
   "net_iface": "$(json_escape "$net_iface")",
@@ -1674,6 +1736,44 @@ show_info() {
   text="${text}service: $svc\n"
   text="${text}binary: $bin\n"
   text="${text}config: $cfg\n"
+  if [ -f "$cfg" ]; then
+    if [ "$mode" = "center" ]; then
+      local listen_addr port
+      listen_addr="$(json_get_string "$cfg" "listen_addr" || true)"
+      port="$(parse_port_from_listen_addr "$listen_addr" || true)"
+      if [ -n "${port:-}" ]; then
+        text="${text}dashboard: http://127.0.0.1:${port}/ (replace host for remote)\n"
+        text="${text}admin: http://127.0.0.1:${port}/admin\n"
+      fi
+
+      local admin_user admin_password ingest_token enroll_token
+      admin_user="$(json_get_string "$cfg" "admin_user" || true)"
+      if [ -z "$admin_user" ]; then admin_user="admin"; fi
+      admin_password="$(json_get_string "$cfg" "admin_password" || true)"
+      if [ -z "$admin_password" ]; then
+        admin_password="$(json_get_string "$cfg" "admin_token" || true)"
+      fi
+      ingest_token="$(json_get_string "$cfg" "ingest_token" || true)"
+      enroll_token="$(json_get_string "$cfg" "enroll_token" || true)"
+
+      if [ -n "${admin_user:-}" ]; then text="${text}admin_user: $admin_user\n"; fi
+      if [ -n "${admin_password:-}" ]; then text="${text}admin_password: $admin_password\n"; fi
+      if [ -n "${enroll_token:-}" ]; then text="${text}enroll_token: $enroll_token\n"; fi
+      if [ -n "${ingest_token:-}" ]; then text="${text}ingest_token: $ingest_token\n"; fi
+    else
+      local agent_id name central_url ingest_token enroll_token
+      agent_id="$(json_get_string "$cfg" "agent_id" || true)"
+      name="$(json_get_string "$cfg" "name" || true)"
+      central_url="$(json_get_string "$cfg" "central_url" || true)"
+      ingest_token="$(json_get_string "$cfg" "ingest_token" || true)"
+      enroll_token="$(json_get_string "$cfg" "enroll_token" || true)"
+      if [ -n "${agent_id:-}" ]; then text="${text}agent_id: $agent_id\n"; fi
+      if [ -n "${name:-}" ]; then text="${text}name: $name\n"; fi
+      if [ -n "${central_url:-}" ]; then text="${text}central_url: $central_url\n"; fi
+      if [ -n "${enroll_token:-}" ]; then text="${text}enroll_token: $enroll_token\n"; fi
+      if [ -n "${ingest_token:-}" ]; then text="${text}ingest_token: $ingest_token\n"; fi
+    fi
+  fi
   if have_systemd && [ -f "$unit" ]; then
     text="${text}log: journalctl -u $svc\n"
   else
@@ -1946,7 +2046,7 @@ self_check() {
     payload="{\"agent_id\":\"${agent_id}\",\"name\":\"${agent_id}\",\"ts_ms\":${ts},\"meta\":{},\"metrics\":{}}"
     local ingest_url="${central%/}/api/ingest"
     if command -v curl >/dev/null 2>&1; then
-      if curl -fsS -m 4 -H "X-Ingest-Token: ${ingest}" -H "Content-Type: application/json" -d "$payload" "$ingest_url" | grep -q '"ok"[[:space:]]*:[[:space:]]*true'; then
+      if curl -fsS -m 4 -H "X-Ingest-Token: ${ingest}" -H "X-Agent-ID: ${agent_id}" -H "Content-Type: application/json" -d "$payload" "$ingest_url" | grep -q '"ok"[[:space:]]*:[[:space:]]*true'; then
         echo "  - POST /api/ingest (password): $(C_GREEN OK)"
       else
         echo "  - POST /api/ingest (password): $(C_RED FAIL) $(L "（静默模式下密码错通常表现为无响应/EOF）" "(stealth mode may look like EOF if password is wrong)")"
@@ -2087,6 +2187,88 @@ restore_backup() {
   return 0
 }
 
+issue_agent_token_center() {
+  local mode="${1:-center}"
+  if [ "$mode" != "center" ]; then
+    echo "$(L "该功能仅适用于服务器端（中心节点）。" "This action is only for server mode (center).")" >&2
+    return 1
+  fi
+  validate_center_config || return 1
+
+  if ! is_running center; then
+    if [ "$(prompt_yesno "$(L "服务器未启动，是否现在启动？" "Server is not running. Start it now?")" "y")" = "true" ]; then
+      start center || return 1
+    else
+      echo "$(L "请先启动服务器后再生成 token。" "Please start the server first, then issue a token.")" >&2
+      return 1
+    fi
+  fi
+
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "$(L "缺少 curl，无法调用中心节点 API。请在“更多/修复 → 安装依赖”中安装。" "Missing curl; cannot call center API. Install it via Tools/Repair → Install deps.")" >&2
+    return 1
+  fi
+
+  local agent_id name
+  agent_id="$(prompt "$(L "服务器 ID（唯一，例如 la-01）" "Server ID (unique, e.g. la-01)")" "")"
+  agent_id="$(echo "${agent_id:-}" | tr -d '[:space:]')"
+  if [ -z "$agent_id" ]; then
+    echo "$(L "错误：ID 必填。" "ERROR: ID is required.")" >&2
+    return 1
+  fi
+  name="$(prompt "$(L "显示名称（可选）" "Display name (optional)")" "$agent_id")"
+  name="${name:-}"
+
+  local cfg port admin_password
+  cfg="$(config_path_for center)"
+  port="$(read_center_listen_port || true)"
+  if [ -z "$port" ]; then port="38088"; fi
+  admin_password="$(json_get_string "$cfg" "admin_password" || true)"
+  if [ -z "$admin_password" ]; then
+    admin_password="$(json_get_string "$cfg" "admin_token" || true)"
+  fi
+  if [ -z "$admin_password" ]; then
+    echo "$(L "错误：无法从配置读取管理密码。" "ERROR: failed to read admin password from config.")" >&2
+    return 1
+  fi
+
+  local base body resp tok
+  local listen_addr host
+  listen_addr="$(json_get_string "$cfg" "listen_addr" || true)"
+  host="127.0.0.1"
+  if [ -n "$listen_addr" ]; then
+    local tmp
+    tmp="${listen_addr//\"/}"
+    tmp="${tmp// /}"
+    host="${tmp%:*}"
+    if [ "$host" = "$tmp" ]; then host="127.0.0.1"; fi
+    case "$host" in
+      ""|":"|"0.0.0.0"|"[::]"|"::") host="127.0.0.1" ;;
+    esac
+  fi
+  base="http://${host}:${port}"
+  body="{\"agent_id\":\"$(json_escape "$agent_id")\",\"name\":\"$(json_escape "$name")\"}"
+  if ! resp="$(curl -fsS -m 6 -H "X-Admin-Token: ${admin_password}" -H "Content-Type: application/json" -d "$body" "${base}/api/admin/issue_agent_token" 2>/dev/null)"; then
+    echo "$(L "错误：生成 token 失败（请检查服务器是否可访问、管理密码是否正确）。" "ERROR: failed to issue token (check server reachability and admin password).")" >&2
+    return 1
+  fi
+  tok="$(echo "$resp" | grep -Eo "\"ingest_token\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -n1 | sed -E 's/.*:[[:space:]]*\"([^\"]*)\".*/\\1/' || true)"
+  if [ -z "$tok" ]; then
+    echo "$(L "错误：返回解析失败。" "ERROR: failed to parse response.")" >&2
+    echo "$resp"
+    return 1
+  fi
+
+  echo ""
+  echo "$(L "已添加/预注册服务器：" "Added/pre-registered server: ")$(C_GREEN "$agent_id")"
+  echo "$(L "节点密码（Ingest Token，填到客户端）：" "Node password (Ingest Token, put into client): ")$(C_GREEN "$tok")"
+  echo ""
+  echo "$(L "客户端只需配置：" "Client only needs:")"
+  echo "  central_url: http://<center-ip>:${port}"
+  echo "  ingest_token: ${tok}"
+  return 0
+}
+
 tools_menu_text() {
   local mode="$1"
   if use_dialog; then
@@ -2111,11 +2293,16 @@ tools_menu_text() {
     printf "  %s. %s\n" "$(fmt_menu_num_green 9)" "$(L "关闭开机自启（无 systemd）" "Disable autostart (no systemd)")"
     printf " %s. %s\n" "$(fmt_menu_num_green 10)" "$(L "校验配置" "Validate config")"
     printf " %s. %s\n" "$(fmt_menu_num_green 11)" "$(L "实时跟随日志（Ctrl+C 退出）" "Follow logs (Ctrl+C to exit)")"
+    local max="11"
+    if [ "$mode" = "center" ]; then
+      printf " %s. %s\n" "$(fmt_menu_num_green 12)" "$(L "添加服务器（生成节点密码）" "Add server (issue node password)")"
+      max="12"
+    fi
     printf "  %s. %s\n" "$(fmt_menu_num_green 0)" "$(L "返回" "Back")"
     echo "$sep"
 
     local n
-    read -r -p "$(L "请输入数字 [0-11]：" "Enter number [0-11]: ")" n || true
+    read -r -p "$(L "请输入数字 [0-"$max"]：" "Enter number [0-"$max"]: ")" n || true
     n="${n:-}"
     case "$n" in
       0) return 0 ;;
@@ -2133,6 +2320,7 @@ tools_menu_text() {
         pause_enter
         ;;
       11) follow_logs "$mode"; pause_enter ;;
+      12) issue_agent_token_center "$mode"; pause_enter ;;
       *) echo "$(L "无效选择。" "Invalid selection.")"; pause_enter ;;
     esac
   done
@@ -2337,7 +2525,7 @@ menu_loop() {
     case "$n" in
       0) upgrade_script || true; pause_enter ;;
       1) install_local "$mode"; pause_enter ;;
-      2) download_binary "$mode" || true; pause_enter ;;
+      2) update_binary "$mode" || true; pause_enter ;;
       3) uninstall "$mode"; pause_enter ;;
       4) start "$mode"; pause_enter ;;
       5) stop "$mode"; pause_enter ;;
@@ -2405,7 +2593,7 @@ menu_loop_dialog() {
     case "$choice" in
       0) dialog_action upgrade_script || true ;;
       1) dialog_action install_local "$mode" || true ;;
-      2) dialog_action download_binary "$mode" || true ;;
+      2) dialog_action update_binary "$mode" || true ;;
       3) dialog_action uninstall "$mode" || true ;;
       4) dialog_action start "$mode" || true ;;
       5) dialog_action stop "$mode" || true ;;

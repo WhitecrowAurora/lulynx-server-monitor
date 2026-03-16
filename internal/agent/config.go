@@ -15,7 +15,6 @@ type Config struct {
 	CentralURL  string `json:"central_url"`
 	IngestToken string `json:"ingest_token"`
 	EnrollToken string `json:"enroll_token,omitempty"`
-	EncryptEnabled bool `json:"encrypt_enabled"`
 
 	CollectIntervalSeconds int `json:"collect_interval_seconds"`
 

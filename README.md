@@ -4,9 +4,8 @@
 - Linux 客户端（探针）采集 `/proc` 指标，HTTP Push 到中心端（无 WebSocket）。
 - 中心端提供面板（卡片 + 每项小网格趋势线）和简单历史接口。
 - 支持可选端口探活（每台服务器配置后在卡片底部显示绿/红点）。
-- 支持可选加密上报（AES-GCM，基于 `ingest_token` 派生密钥；无需 HTTPS 也能避免明文泄露密码/指标）。
 - 支持“静默拒绝”未授权上报：未带正确密码/密钥的请求会直接断开连接（减少被扫描指纹）。
-- 支持可选自助注册（Enroll）：客户端用 `enroll_token`（接入密码/中心密码）换取中心端下发的“单机上报密码”（并自动写回配置），降低共享密码泄露风险。
+- 支持可选自助注册（Enroll，高级）：客户端用 `enroll_token`（接入密码，可选）换取中心端下发的“单机上报密码”（并自动写回配置），降低共享密码泄露风险。
 - 支持可选“主动受控模式”：中心端可主动连客户端的控制端口（默认 38088）进行探测/下发；未连通时卡片会高斯模糊提示。
 
 ## 快速开始
@@ -28,7 +27,7 @@
   - `sudo ./run.sh client configure`（或 `./run.sh probe configure`）
   - `sudo ./run.sh client start`（或 `./run.sh probe start`）
 
-> `client configure` 默认只需要填写“中心地址 + 中心密码”；密码留空会保持不变（避免在终端回显已有密码）。
+> `client configure` 默认只需要填写“中心地址 + 上报密码”；密码留空会保持不变（避免在终端回显已有密码）。
 
 脚本支持：`install / configure / start / stop / restart / status / show-config / uninstall`（优先 systemd，没 systemd 就用 nohup+pidfile）。
 
@@ -57,9 +56,9 @@
    - `configs/center.example.json` → `center.json`
 2. 修改 `center.json`：
    - `ingest_token`：上报密码（中心端用来校验/解密；客户端自助注册后会拿到“单机上报密码”）
-   - `admin_token`：管理密码（管理 API / 控制面板登录）
-   - `enroll_token`：接入密码（用于 `POST /api/enroll` 下发单机上报密码；可把它设为和 `admin_token` 一样以简化部署）
-   - `enroll_max_fails` / `enroll_ban_hours`：同一 IP 连续输错 enroll_secret 会自动封禁（默认 5 次 / 8 小时）
+   - `admin_user` / `admin_password`：控制面板用户名/密码（`/admin` 登录）
+   - `enroll_token`：（可选）接入密码（用于 `POST /api/enroll` 下发单机上报密码；留空则关闭 enroll）
+   - `enroll_max_fails` / `enroll_ban_hours`：同一 IP 连续输错 enroll_token 会自动封禁（默认 5 次 / 8 小时）
    - `data_dir`：数据目录（会生成 `settings.json`、`servers.json`、以及历史数据）
    - `stealth_ingest_unauthorized`：未授权上报是否静默断开（默认建议 `true`）
 3. 启动：
@@ -72,15 +71,14 @@
 1. 复制配置：
    - `configs/probe.example.json` → `probe.json`（兼容旧名：`agent.json`）
 2. 修改 `probe.json`：
-   - `central_url`：中心端地址（例如 `http://center.example.com:38088` 或 `center.example.com:38088`）
-   - `enroll_token`：接入密码/中心密码（推荐：仅填它即可；客户端启动后会自动 enroll 并把中心端返回的“单机上报密码”写回 `probe.json`，同时移除 `enroll_token`）
-   - （可选）`agent_id` / `name`：不填时会用 hostname 自动生成
-   - （可选）`ingest_token`：传统方式（和中心端一致），不建议长期共享
-   - `encrypt_enabled`：是否启用加密上报（可选）
+    - `central_url`：中心端地址（例如 `http://center.example.com:38088` 或 `center.example.com:38088`）
+    - `ingest_token`：上报密码（推荐：直接填这个；可用中心端的全局 `ingest_token`，或在 `/admin` “添加服务器”生成单机 token）
+    - `enroll_token`：（高级，可选）接入密码（仅用于自动 enroll 换取单机 token）
+    - （可选）`agent_id` / `name`：不填时会用 hostname 自动生成
 3. 编译（示例：Linux amd64）：
-   - `GOOS=linux GOARCH=amd64 go build -o tanzhen-probe ./cmd/agent`
+    - `GOOS=linux GOARCH=amd64 go build -o tanzhen-probe ./cmd/agent`
 4. 在服务器运行：
-   - `./tanzhen-probe -config probe.json`
+    - `./tanzhen-probe -config probe.json`
 
 > 客户端当前仅支持 Linux（依赖 `/proc`）。
 
@@ -107,7 +105,11 @@
 
 客户端下次上报会携带端口状态，面板底部显示绿/红点。
 
-## 管理 API（需要 `X-Admin-Token` 管理密码）
+## 管理 API（Web 登录或 `X-Admin-Token`）
+
+Web 控制面板：打开 `/admin`，用 `admin_user` / `admin_password` 登录。
+
+CLI/脚本调用：也可用 Header `X-Admin-Token: <admin_password>`（兼容旧版命名）。
 
 更新全局设置（采集间隔/保留天数/面板轮询）：
 - `POST /api/admin/settings`
@@ -115,11 +117,15 @@
 更新某台服务器配置（包含 `expires_date`、端口列表、采集间隔等）：
 - `POST /api/admin/server`
 
+添加/预注册服务器并生成“单机上报密码”（Ingest Token）：
+- `POST /api/admin/issue_agent_token`（body：`{"agent_id":"la-01","name":"LA-01"}`）→ 返回 `ingest_token`
+  - 客户端把返回的 `ingest_token` 填到 `probe.json` 的 `ingest_token` 即可（无需共享中心端的全局 `ingest_token`）。
+
 查看/解除 enroll 黑名单：
 - `GET /api/admin/bans`
 - `POST /api/admin/bans`（body：`{"ip":"x.x.x.x"}`）
 
-查看/解除 Admin Token 尝试黑名单：
+查看/解除 管理密码尝试黑名单：
 - `GET /api/admin/admin_bans`
 - `POST /api/admin/admin_bans`（body：`{"ip":"x.x.x.x"}`）
 

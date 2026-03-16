@@ -5,19 +5,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type Config struct {
 	ListenAddr string `json:"listen_addr"`
 	DataDir    string `json:"data_dir"`
 
-	IngestToken string `json:"ingest_token"`
-	AdminToken  string `json:"admin_token"`
+	IngestToken   string `json:"ingest_token"`
+	AdminUser     string `json:"admin_user,omitempty"`
+	AdminPassword string `json:"admin_password,omitempty"`
+	// AdminToken is a legacy alias for AdminPassword (kept for backward compatibility).
+	AdminToken string `json:"admin_token,omitempty"`
 	// EnrollToken is an optional bootstrap secret for issuing per-agent ingest tokens.
 	// If empty, /api/enroll is disabled.
-	EnrollToken string `json:"enroll_token,omitempty"`
-	EnrollMaxFails int `json:"enroll_max_fails,omitempty"`
-	EnrollBanHours int `json:"enroll_ban_hours,omitempty"`
+	EnrollToken    string `json:"enroll_token,omitempty"`
+	EnrollMaxFails int    `json:"enroll_max_fails,omitempty"`
+	EnrollBanHours int    `json:"enroll_ban_hours,omitempty"`
 	// TrustProxy controls whether to use X-Forwarded-For for ban/rate-limit IP accounting.
 	// Only enable if the center is behind a trusted reverse proxy.
 	TrustProxy bool `json:"trust_proxy,omitempty"`
@@ -71,8 +75,22 @@ func LoadConfig(path string) (Config, error) {
 	if cfg.IngestToken == "" {
 		return Config{}, fmt.Errorf("%s: ingest_token is required", path)
 	}
-	if cfg.AdminToken == "" {
-		return Config{}, fmt.Errorf("%s: admin_token is required", path)
+
+	cfg.AdminUser = strings.TrimSpace(cfg.AdminUser)
+	if cfg.AdminUser == "" {
+		cfg.AdminUser = "admin"
+	}
+	cfg.AdminPassword = strings.TrimSpace(cfg.AdminPassword)
+	cfg.AdminToken = strings.TrimSpace(cfg.AdminToken)
+	if cfg.AdminPassword == "" {
+		cfg.AdminPassword = cfg.AdminToken
+	}
+	// Default admin password to ingest_token in simple deployments.
+	if cfg.AdminPassword == "" {
+		cfg.AdminPassword = cfg.IngestToken
+	}
+	if cfg.AdminPassword == "" {
+		return Config{}, fmt.Errorf("%s: admin_password (or legacy admin_token) is required", path)
 	}
 	if cfg.DataDir != "" {
 		cfg.DataDir = filepath.Clean(cfg.DataDir)

@@ -14,11 +14,11 @@ type enrollReq struct {
 }
 
 type enrollResp struct {
-	OK         bool   `json:"ok"`
-	AgentID    string `json:"agent_id,omitempty"`
-	IngestToken string `json:"ingest_token,omitempty"`
-	Error      string `json:"error,omitempty"`
-	BannedUntilMS int64 `json:"banned_until_ms,omitempty"`
+	OK            bool   `json:"ok"`
+	AgentID       string `json:"agent_id,omitempty"`
+	IngestToken   string `json:"ingest_token,omitempty"`
+	Error         string `json:"error,omitempty"`
+	BannedUntilMS int64  `json:"banned_until_ms,omitempty"`
 }
 
 func (s *Service) enrollExpectedSecret() string {
@@ -67,7 +67,7 @@ func (s *Service) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		got = r.URL.Query().Get("x-enroll-token")
 	}
 	if got == "" {
-		// Convenience: allow reusing admin token as enroll token by setting enroll_token == admin_token.
+		// Convenience: allow reusing admin password as enroll token by setting enroll_token == admin_password.
 		got = r.Header.Get("X-Admin-Token")
 		if got == "" {
 			got = r.URL.Query().Get("x-admin-token")

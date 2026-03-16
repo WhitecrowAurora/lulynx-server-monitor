@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>控制面板登录</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div class="halftone" aria-hidden="true"></div>
+
+    <div class="topwrap">
+      <header class="topbar">
+        <div class="top-left">
+          <a class="pill link" href="/" title="返回">← 返回</a>
+        </div>
+        <div class="top-stats" style="justify-content:center">
+          <div class="stat" style="min-width:260px">
+            <div class="label">控制面板登录</div>
+            <div class="value small">输入用户名和密码后进入管理面板</div>
+          </div>
+        </div>
+        <div class="top-right"></div>
+      </header>
+      <div class="tape" aria-hidden="true">
+        <div class="tape-inner animate-marquee" id="tapeInner">
+          <div class="tape-chunk">Lulynx Server Monitor /// Admin Login /// Lulynx Server Monitor /// Admin Login ///</div>
+          <div class="tape-chunk">Lulynx Server Monitor /// Admin Login /// Lulynx Server Monitor /// Admin Login ///</div>
+        </div>
+      </div>
+    </div>
+
+    <main class="grid admin-grid">
+      <section class="card admin-card">
+        <div class="card-head">
+          <div class="title-row">
+            <div class="server-name">登录</div>
+          </div>
+          <div class="sub-row">
+            <div class="sub">如忘记密码，可在中心节点配置文件中重置。</div>
+          </div>
+        </div>
+        <div class="metrics admin-form">
+          <div class="form-row">
+            <label>用户名</label>
+            <input class="input" id="userInput" placeholder="admin" autocomplete="username" />
+          </div>
+          <div class="form-row">
+            <label>密码</label>
+            <input class="input" id="passInput" type="password" placeholder="••••••••" autocomplete="current-password" />
+          </div>
+          <div class="form-row">
+            <button class="pill" id="loginBtn" type="button">登录</button>
+            <div class="sub" id="loginMsg"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/tz_login.js"></script>
+  </body>
+</html>
+

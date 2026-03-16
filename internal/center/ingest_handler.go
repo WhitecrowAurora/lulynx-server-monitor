@@ -45,10 +45,13 @@ func (s *Service) handleIngest(w http.ResponseWriter, r *http.Request) {
 			s.mu.RLock()
 			expected := strings.TrimSpace(s.secrets[agentID])
 			s.mu.RUnlock()
-			if expected == "" {
-				expected = s.cfg.IngestToken
-			}
-			if got != expected {
+			// Accept either per-agent token or the global ingest token (for simple deployments / migration).
+			if expected != "" {
+				if got != expected && got != s.cfg.IngestToken {
+					s.ingestReject(w, r)
+					return
+				}
+			} else if got != s.cfg.IngestToken {
 				s.ingestReject(w, r)
 				return
 			}
@@ -71,14 +74,6 @@ func (s *Service) handleIngest(w http.ResponseWriter, r *http.Request) {
 		if agentID == "" {
 			agentID = bodyAgentID
 		} else if agentID != bodyAgentID {
-			s.ingestReject(w, r)
-			return
-		}
-		// If this agent has a per-agent token, enforce it even for plain ingest.
-		s.mu.RLock()
-		expected2 := strings.TrimSpace(s.secrets[agentID])
-		s.mu.RUnlock()
-		if expected2 != "" && got != expected2 {
 			s.ingestReject(w, r)
 			return
 		}
@@ -105,16 +100,21 @@ func (s *Service) handleIngest(w http.ResponseWriter, r *http.Request) {
 			s.ingestReject(w, r)
 			return
 		}
-		// Use per-agent key if enrolled; otherwise fallback to global ingest_key.
+		// Use per-agent key if enrolled; also accept global key for simple deployments / migration.
 		s.mu.RLock()
 		agentTok := strings.TrimSpace(s.secrets[agentID])
 		s.mu.RUnlock()
-		key := s.ingestKey
+		var plain []byte
+		var decErr error
 		if agentTok != "" {
-			key = common.DeriveKeySHA256(agentTok)
+			plain, decErr = common.DecryptAESGCM(common.DeriveKeySHA256(agentTok), []byte(agentID), nonce, ct)
+			if decErr != nil {
+				plain, decErr = common.DecryptAESGCM(s.ingestKey, []byte(agentID), nonce, ct)
+			}
+		} else {
+			plain, decErr = common.DecryptAESGCM(s.ingestKey, []byte(agentID), nonce, ct)
 		}
-		plain, err := common.DecryptAESGCM(key, []byte(agentID), nonce, ct)
-		if err != nil {
+		if decErr != nil {
 			s.ingestReject(w, r)
 			return
 		}

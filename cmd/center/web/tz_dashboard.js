@@ -7,40 +7,56 @@
     trafficWindow: "1d",
     pollMs: 3000,
     history: new Map(),
+    isAdmin: false,
   };
+
+  // Sparkline history window (in-memory): target ~5 minutes.
+  const HIST_WINDOW_MS = 5 * 60 * 1000;
 
   const ui = {
     compact: (U.store.get("ui_compact") || "") === "1",
   };
 
-  function adminToken() {
-    return (U.store.get("admin_token") || "").trim();
-  }
-
   function updateAdminBtn() {
     const el = document.getElementById("adminBtn");
     if (!el) return;
-    const tok = adminToken();
-    if (tok) {
+    if (state.isAdmin) {
       el.textContent = "管理";
       el.title = "控制面板";
+      el.href = "/admin";
     } else {
       el.textContent = "登录";
       el.title = "登录控制面板";
+      el.href = "/admin/login?next=%2Fadmin";
     }
   }
 
+  async function checkAdminSession() {
+    try {
+      const res = await fetch("/api/admin/session", { cache: "no-store", credentials: "same-origin" });
+      const data = await res.json().catch(() => null);
+      state.isAdmin = !!data?.authed;
+    } catch {
+      state.isAdmin = false;
+    }
+    updateAdminBtn();
+  }
+
   async function adminPatchServer(patch) {
-    const token = adminToken();
-    if (!token) throw new Error("no admin token");
     const res = await fetch("/api/admin/server_patch", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Admin-Token": token,
       },
+      credentials: "same-origin",
       body: JSON.stringify(patch || {}),
     });
+    if (res.status === 401) {
+      state.isAdmin = false;
+      updateAdminBtn();
+      location.href = `/admin/login?next=${encodeURIComponent("/")}`;
+      throw new Error("unauthorized");
+    }
     if (!res.ok) throw new Error(`patch ${res.status}`);
     const data = await res.json().catch(() => null);
     if (!data || !data.ok) throw new Error("patch failed");
@@ -81,8 +97,14 @@
     return h;
   }
 
+  function histMaxPoints() {
+    const poll = Math.max(1000, state.pollMs || 3000);
+    const pts = Math.ceil(HIST_WINDOW_MS / poll) + 1;
+    return Math.max(60, Math.min(300, pts));
+  }
+
   function pushHist(key, v) {
-    const h = getHist(key, 60);
+    const h = getHist(key, histMaxPoints());
     h.vals.push(v);
     if (h.vals.length > h.max) h.vals.splice(0, h.vals.length - h.max);
   }
@@ -293,11 +315,12 @@
         : "";
     }
     if (ctrlBtn) {
-      const tok = adminToken();
-      if (!tok) {
+      if (!state.isAdmin) {
         ctrlBtn.classList.add("hidden");
+        card.classList.remove("has-ctrl-toggle");
       } else {
         ctrlBtn.classList.remove("hidden");
+        card.classList.add("has-ctrl-toggle");
         ctrlBtn.classList.toggle("on", isActive);
         ctrlBtn.classList.toggle("off", !isActive);
         ctrlBtn.textContent = isActive ? "主动" : "被动";
@@ -315,6 +338,8 @@
           }
         });
       }
+    } else {
+      card.classList.remove("has-ctrl-toggle");
     }
 
     card.querySelector(".server-name").textContent = s.name || s.id;
@@ -530,7 +555,6 @@
   async function tick() {
     try {
       const data = await fetchSnapshot();
-      updateAdminBtn();
       renderTop(data);
       renderCards(data);
 
@@ -547,9 +571,10 @@
 
   function init() {
     applyCompact();
-    updateAdminBtn();
+    checkAdminSession();
     setNowTime();
     setInterval(setNowTime, 1000);
+    setInterval(checkAdminSession, 30000);
 
     const compactBtn = document.getElementById("compactBtn");
     if (compactBtn) {
